@@ -22,7 +22,8 @@ from models import NetworkModel
 
 class NodeMarker(QGraphicsEllipseItem):
     def __init__(self, x, y):
-        super().__init__(x - 5, y - 5, 10, 10)
+        super().__init__(-5, -5, 10, 10)
+        self.setPos(x, y)
 
         self.normal_pen = QPen(QColor("#1f4d7a"))
         self.normal_brush = QBrush(QColor("#4a90c2"))
