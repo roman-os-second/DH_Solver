@@ -91,17 +91,6 @@ class CanvasView(QGraphicsView):
 
     def select_item_at(self, position):
         clicked_item = self.itemAt(position)
-        line_count_before = sum(
-            isinstance(scene_item, QGraphicsLineItem) for scene_item in self.scene().items()
-        )
-        print(
-            "Select debug before:",
-            f"type={type(clicked_item)}",
-            f"is_line={isinstance(clicked_item, QGraphicsLineItem)}",
-            f"visible={clicked_item.isVisible() if clicked_item else None}",
-            f"z={clicked_item.zValue() if clicked_item else None}",
-            f"line_count={line_count_before}",
-        )
 
         item = clicked_item
 
@@ -115,21 +104,9 @@ class CanvasView(QGraphicsView):
         else:
             self.scene().clearSelection()
 
-        line_count_after = sum(
-            isinstance(scene_item, QGraphicsLineItem) for scene_item in self.scene().items()
-        )
-        belongs_to_scene = (
-            clicked_item is not None and clicked_item.scene() is self.scene()
-        )
-        print(
-            "Select debug after:",
-            f"type={type(clicked_item)}",
-            f"is_line={isinstance(clicked_item, QGraphicsLineItem)}",
-            f"visible={clicked_item.isVisible() if clicked_item else None}",
-            f"z={clicked_item.zValue() if clicked_item else None}",
-            f"belongs_to_scene={belongs_to_scene}",
-            f"line_count={line_count_after}",
-        )
+        #PySide6 workaround: accessing the clicked item's scene prevents grid lines from disappearing after a Select-mode click
+        #revisit if the canvas/selection implementation is refactored
+        _ = (clicked_item is not None and clicked_item.scene() is self.scene())
 
     def wheelEvent(self, event):
         wheel_delta = event.angleDelta().y()
@@ -197,7 +174,6 @@ class CanvasView(QGraphicsView):
             if should_place_node and self.node_placement_callback is not None:
                 self.node_placement_callback(self.mapToScene(click_position))
             elif should_select_item:
-                print(f"Select debug release position: {click_position}")
                 self.select_item_at(click_position)
 
             event.accept()
