@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QGraphicsEllipseItem,
     QGraphicsItem,
+    QGraphicsLineItem,
     QGraphicsScene,
     QGraphicsView,
     QHBoxLayout,
@@ -89,16 +90,46 @@ class CanvasView(QGraphicsView):
             self.unsetCursor()
 
     def select_item_at(self, position):
-        item = self.itemAt(position)
+        clicked_item = self.itemAt(position)
+        line_count_before = sum(
+            isinstance(scene_item, QGraphicsLineItem) for scene_item in self.scene().items()
+        )
+        print(
+            "Select debug before:",
+            f"type={type(clicked_item)}",
+            f"is_line={isinstance(clicked_item, QGraphicsLineItem)}",
+            f"visible={clicked_item.isVisible() if clicked_item else None}",
+            f"z={clicked_item.zValue() if clicked_item else None}",
+            f"line_count={line_count_before}",
+        )
+
+        item = clicked_item
 
         while item is not None:
             if item.flags() & QGraphicsItem.GraphicsItemFlag.ItemIsSelectable:
+                self.scene().clearSelection()
+                item.setSelected(True)
                 break
-            item = item.parentItem()
 
-        self.scene().clearSelection()
-        if item is not None:
-            item.setSelected(True)
+            item = item.parentItem()
+        else:
+            self.scene().clearSelection()
+
+        line_count_after = sum(
+            isinstance(scene_item, QGraphicsLineItem) for scene_item in self.scene().items()
+        )
+        belongs_to_scene = (
+            clicked_item is not None and clicked_item.scene() is self.scene()
+        )
+        print(
+            "Select debug after:",
+            f"type={type(clicked_item)}",
+            f"is_line={isinstance(clicked_item, QGraphicsLineItem)}",
+            f"visible={clicked_item.isVisible() if clicked_item else None}",
+            f"z={clicked_item.zValue() if clicked_item else None}",
+            f"belongs_to_scene={belongs_to_scene}",
+            f"line_count={line_count_after}",
+        )
 
     def wheelEvent(self, event):
         wheel_delta = event.angleDelta().y()
@@ -166,6 +197,7 @@ class CanvasView(QGraphicsView):
             if should_place_node and self.node_placement_callback is not None:
                 self.node_placement_callback(self.mapToScene(click_position))
             elif should_select_item:
+                print(f"Select debug release position: {click_position}")
                 self.select_item_at(click_position)
 
             event.accept()
@@ -241,8 +273,13 @@ class MainWindow(QMainWindow):
         self.grid_size = 25
         grid_pen = QPen(QColor("#d0d0d0"))
         for position in range(0, 2001, self.grid_size):
-            self.scene.addLine(position, 0, position, 2000, grid_pen)
-            self.scene.addLine(0, position, 2000, position, grid_pen)
+            vertical_line = self.scene.addLine(position, 0, position, 2000, grid_pen)
+            horizontal_line = self.scene.addLine(0, position, 2000, position, grid_pen)
+
+            for grid_line in (vertical_line, horizontal_line):
+                grid_line.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, False)
+                grid_line.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+                grid_line.setZValue(-1)
 
         self.canvas = CanvasView(self.scene)
         self.canvas.node_placement_callback = self.place_node
