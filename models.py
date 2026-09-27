@@ -1,0 +1,69 @@
+from dataclasses import dataclass
+
+
+@dataclass
+class Node:
+    ID: str
+    X: float
+    Y: float
+    Z: float
+
+
+@dataclass
+class Pipe:
+    ID: str
+    start_node: str
+    end_node: str
+    diameter: float
+    roughness: float
+    length: float
+    heat_loss_coefficient: float
+
+
+@dataclass
+class Source:
+    ID: str
+    Node: str
+    P_s: float
+    P_r: float
+    T_s: float
+    T_r: float
+
+
+@dataclass
+class Consumer:
+    ID: str
+    Node: str
+    thermal_power_demand: float
+
+
+class NetworkModel:
+    def __init__(self):
+        self.nodes: dict[str, Node] = {}
+        self.pipes: dict[str, Pipe] = {}
+        self.sources: dict[str, Source] = {}
+        self.consumers: dict[str, Consumer] = {}
+
+    def add_node(self, node):
+        self.nodes[node.ID] = node
+
+    def delete_node(self, node_id):
+        self.nodes.pop(node_id, None)
+
+    def add_pipe(self, pipe):
+        self.pipes[pipe.ID] = pipe
+
+    def delete_pipe(self, pipe_id):
+        self.pipes.pop(pipe_id, None)
+
+    def add_source(self, source):
+        self.sources[source.ID] = source
+
+    def delete_source(self, source_id):
+        self.sources.pop(source_id, None)
+
+    def add_consumer(self, consumer):
+        self.consumers[consumer.ID] = consumer
+
+    def delete_consumer(self, consumer_id):
+        self.consumers.pop(consumer_id, None)
