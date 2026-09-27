@@ -43,6 +43,17 @@ class NetworkModel:
         self.pipes: dict[str, Pipe] = {}
         self.sources: dict[str, Source] = {}
         self.consumers: dict[str, Consumer] = {}
+        self.node_counter = 0
+
+    def create_node(self, x, y, z):
+        self.node_counter += 1
+        node_id = f"N{self.node_counter}"
+        node = Node(node_id, x, y, z)
+        self.add_node(node)
+        return node
+
+    def createNode(self, x, y, z):
+        return self.create_node(x, y, z)
 
     def add_node(self, node):
         self.nodes[node.ID] = node

@@ -1,8 +1,14 @@
 import sys
 
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QBrush, QColor, QPen
 from PySide6.QtWidgets import (
     QApplication,
     QFrame,
+    QGraphicsEllipseItem,
+    QGraphicsItem,
+    QGraphicsScene,
+    QGraphicsView,
     QHBoxLayout,
     QMainWindow,
     QMessageBox,
@@ -11,10 +17,167 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from models import NetworkModel
+
+
+class NodeMarker(QGraphicsEllipseItem):
+    def __init__(self, x, y):
+        super().__init__(x - 5, y - 5, 10, 10)
+
+        self.normal_pen = QPen(QColor("#1f4d7a"))
+        self.normal_brush = QBrush(QColor("#4a90c2"))
+        self.selected_pen = QPen(QColor("#f28c28"))
+        self.selected_brush = QBrush(QColor("#ffd84d"))
+
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable)
+        self.update_appearance(False)
+
+    def itemChange(self, change, value):
+        if change == QGraphicsItem.GraphicsItemChange.ItemSelectedHasChanged:
+            self.update_appearance(value)
+
+        return super().itemChange(change, value)
+
+    def update_appearance(self, selected):
+        if selected:
+            self.setPen(self.selected_pen)
+            self.setBrush(self.selected_brush)
+        else:
+            self.setPen(self.normal_pen)
+            self.setBrush(self.normal_brush)
+
+    def paint(self, painter, option, widget=None):
+        painter.setPen(self.pen())
+        painter.setBrush(self.brush())
+        painter.drawEllipse(self.rect())
+
+
+class CanvasView(QGraphicsView):
+    def __init__(self, scene):
+        super().__init__(scene)
+
+        self.zoom_level = 1.0
+        self.min_zoom = 0.2
+        self.max_zoom = 5.0
+        self.zoom_factor = 1.15
+        self.node_placement_mode = False
+        self.selection_mode = False
+        self.node_placement_callback = None
+        self.pan_start_position = None
+        self.last_pan_position = None
+        self.is_panning = False
+
+        self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
+
+    def set_node_placement_mode(self, active):
+        self.node_placement_mode = active
+        self.update_cursor()
+
+    def set_selection_mode(self, active):
+        self.selection_mode = active
+        if not active:
+            self.scene().clearSelection()
+        self.update_cursor()
+
+    def update_cursor(self):
+        if self.is_panning:
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+        elif self.node_placement_mode:
+            self.setCursor(Qt.CursorShape.CrossCursor)
+        else:
+            self.unsetCursor()
+
+    def select_item_at(self, position):
+        item = self.itemAt(position)
+
+        while item is not None:
+            if item.flags() & QGraphicsItem.GraphicsItemFlag.ItemIsSelectable:
+                break
+            item = item.parentItem()
+
+        self.scene().clearSelection()
+        if item is not None:
+            item.setSelected(True)
+
+    def wheelEvent(self, event):
+        wheel_delta = event.angleDelta().y()
+        if wheel_delta == 0:
+            super().wheelEvent(event)
+            return
+
+        zoom_factor = self.zoom_factor if wheel_delta > 0 else 1 / self.zoom_factor
+        new_zoom = self.zoom_level * zoom_factor
+
+        if self.min_zoom <= new_zoom <= self.max_zoom:
+            self.scale(zoom_factor, zoom_factor)
+            self.zoom_level = new_zoom
+
+        event.accept()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.pan_start_position = event.position().toPoint()
+            self.last_pan_position = self.pan_start_position
+            self.is_panning = False
+            event.accept()
+            return
+
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self.last_pan_position is not None:
+            current_position = event.position().toPoint()
+
+            if not self.is_panning:
+                distance = (current_position - self.pan_start_position).manhattanLength()
+                if distance < QApplication.startDragDistance():
+                    event.accept()
+                    return
+
+                self.is_panning = True
+                self.update_cursor()
+
+            delta = current_position - self.last_pan_position
+
+            self.horizontalScrollBar().setValue(
+                self.horizontalScrollBar().value() - delta.x()
+            )
+            self.verticalScrollBar().setValue(
+                self.verticalScrollBar().value() - delta.y()
+            )
+            self.last_pan_position = current_position
+            event.accept()
+            return
+
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton and self.last_pan_position is not None:
+            should_place_node = self.node_placement_mode and not self.is_panning
+            should_select_item = self.selection_mode and not self.is_panning
+            click_position = event.position().toPoint()
+
+            self.pan_start_position = None
+            self.last_pan_position = None
+            self.is_panning = False
+            self.update_cursor()
+
+            if should_place_node and self.node_placement_callback is not None:
+                self.node_placement_callback(self.mapToScene(click_position))
+            elif should_select_item:
+                self.select_item_at(click_position)
+
+            event.accept()
+            return
+
+        super().mouseReleaseEvent(event)
+
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+
+        self.model = NetworkModel()
 
         self.setWindowTitle("DH Solver")
         self.resize(640, 400)
@@ -50,10 +213,17 @@ class MainWindow(QMainWindow):
         toolbox_layout.setContentsMargins(8, 8, 8, 8)
         toolbox_layout.setSpacing(8)
 
-        for name in ("Nodes", "Pipes", "Source", "Consumer", "Delete"):
+        self.active_tool = None
+        self.toolbox_buttons = {}
+
+        for name in ("Select", "Nodes", "Pipes", "Source", "Consumer", "Delete"):
             button = QPushButton(name)
             button.setFixedSize(120, 32)
-            button.clicked.connect(lambda checked=False, name=name: self.show_message(name))
+            button.setCheckable(True)
+            button.clicked.connect(
+                lambda checked, name=name: self.set_active_tool(name, checked)
+            )
+            self.toolbox_buttons[name] = button
             toolbox_layout.addWidget(button)
 
         toolbox_layout.addStretch()
@@ -64,8 +234,18 @@ class MainWindow(QMainWindow):
         toolbox_separator.setFrameShadow(QFrame.Sunken)
         workspace_layout.addWidget(toolbox_separator)
 
-        canvas = QWidget()
-        workspace_layout.addWidget(canvas, 1)
+        self.scene = QGraphicsScene(self)
+        self.scene.setSceneRect(0, 0, 2000, 2000)
+
+        self.grid_size = 25
+        grid_pen = QPen(QColor("#d0d0d0"))
+        for position in range(0, 2001, self.grid_size):
+            self.scene.addLine(position, 0, position, 2000, grid_pen)
+            self.scene.addLine(0, position, 2000, position, grid_pen)
+
+        self.canvas = CanvasView(self.scene)
+        self.canvas.node_placement_callback = self.place_node
+        workspace_layout.addWidget(self.canvas, 1)
         main_layout.addLayout(workspace_layout)
 
         self.setCentralWidget(central_widget)
@@ -99,6 +279,30 @@ class MainWindow(QMainWindow):
 
     def show_message(self, message):
         QMessageBox.information(self, message, message)
+
+    def set_active_tool(self, tool_name, active):
+        if active:
+            for name, button in self.toolbox_buttons.items():
+                if name != tool_name:
+                    button.setChecked(False)
+            self.active_tool = tool_name
+        else:
+            self.active_tool = None
+
+        self.canvas.set_node_placement_mode(self.active_tool == "Nodes")
+        self.canvas.set_selection_mode(self.active_tool == "Select")
+
+    def place_node(self, scene_position):
+        x = float(round(scene_position.x() / self.grid_size) * self.grid_size)
+        y = float(round(scene_position.y() / self.grid_size) * self.grid_size)
+        node = self.model.createNode(x, y, 0.0)
+
+        marker = NodeMarker(x, y)
+        self.scene.addItem(marker)
+
+        label = self.scene.addText(node.ID)
+        label.setParentItem(marker)
+        label.setPos(8, -12)
 
 
 def main():
