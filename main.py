@@ -3,7 +3,9 @@ import sys
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QBrush, QColor, QPen
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QApplication,
+    QDialog,
     QFrame,
     QGraphicsEllipseItem,
     QGraphicsItem,
@@ -14,6 +16,9 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QTabWidget,
+    QTableWidget,
+    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -203,7 +208,12 @@ class MainWindow(QMainWindow):
         for name in ("Run Simulation", "Properties", "Verification", "Clear Results"):
             button = QPushButton(name)
             button.setFixedSize(120, 32)
-            button.clicked.connect(lambda checked=False, name=name: self.show_message(name))
+            if name == "Properties":
+                button.clicked.connect(self.show_properties)
+            else:
+                button.clicked.connect(
+                    lambda checked=False, name=name: self.show_message(name)
+                )
             action_layout.addWidget(button)
 
         action_layout.addStretch()
@@ -293,6 +303,60 @@ class MainWindow(QMainWindow):
 
     def show_message(self, message):
         QMessageBox.information(self, message, message)
+
+    def show_properties(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Model Data")
+
+        layout = QVBoxLayout(dialog)
+        tabs = QTabWidget()
+
+        def create_read_only_table(headers, row_count=0):
+            table = QTableWidget(row_count, len(headers))
+            table.setHorizontalHeaderLabels(headers)
+            table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+            return table
+
+        nodes_table = create_read_only_table(
+            ("ID", "X", "Y", "Z"), len(self.model.nodes)
+        )
+
+        for row, node in enumerate(self.model.nodes.values()):
+            nodes_table.setItem(row, 0, QTableWidgetItem(node.ID))
+            nodes_table.setItem(row, 1, QTableWidgetItem(str(node.X)))
+            nodes_table.setItem(row, 2, QTableWidgetItem(str(node.Y)))
+            nodes_table.setItem(row, 3, QTableWidgetItem(str(node.Z)))
+
+        pipes_table = create_read_only_table(
+            (
+                "ID",
+                "Start Node",
+                "End Node",
+                "Diameter",
+                "Roughness",
+                "Length",
+                "Heat Loss Coefficient",
+            )
+        )
+        sources_table = create_read_only_table(
+            ("ID", "Node", "P_s", "P_r", "T_s", "T_r")
+        )
+        consumers_table = create_read_only_table(
+            ("ID", "Node", "Thermal Power Demand")
+        )
+
+        for table, name in (
+            (nodes_table, "Nodes"),
+            (pipes_table, "Pipes"),
+            (sources_table, "Sources"),
+            (consumers_table, "Consumers"),
+        ):
+            table.resizeColumnsToContents()
+            tabs.addTab(table, name)
+
+        layout.addWidget(tabs)
+        dialog.resize(640, 300)
+        dialog.exec()
 
     def set_active_tool(self, tool_name, active):
         if active:
