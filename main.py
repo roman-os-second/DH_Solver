@@ -9,7 +9,6 @@ from PySide6.QtWidgets import (
     QFrame,
     QGraphicsEllipseItem,
     QGraphicsItem,
-    QGraphicsLineItem,
     QGraphicsScene,
     QGraphicsView,
     QHBoxLayout,
@@ -60,21 +59,51 @@ class NodeMarker(QGraphicsEllipseItem):
 
 
 class CanvasView(QGraphicsView):
-    def __init__(self, scene):
+    def __init__(self, scene, grid_size):
         super().__init__(scene)
 
+        self.grid_size = grid_size
         self.zoom_level = 1.0
         self.min_zoom = 0.2
         self.max_zoom = 5.0
         self.zoom_factor = 1.15
         self.node_placement_mode = False
         self.selection_mode = False
+        self.pipe_creation_mode = False
         self.node_placement_callback = None
+        self.pipe_node_callback = None
         self.pan_start_position = None
         self.last_pan_position = None
         self.is_panning = False
 
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
+
+    def drawBackground(self, painter, rect):
+        super().drawBackground(painter, rect)
+
+        scene_rect = self.scene().sceneRect()
+        left = max(rect.left(), scene_rect.left())
+        top = max(rect.top(), scene_rect.top())
+        right = min(rect.right(), scene_rect.right())
+        bottom = min(rect.bottom(), scene_rect.bottom())
+
+        if left > right or top > bottom:
+            return
+
+        first_x = int(left // self.grid_size) * self.grid_size
+        first_y = int(top // self.grid_size) * self.grid_size
+        grid_pen = QPen(QColor("#d0d0d0"))
+
+        painter.save()
+        painter.setPen(grid_pen)
+
+        for x in range(first_x, int(right) + self.grid_size, self.grid_size):
+            painter.drawLine(x, int(top), x, int(bottom))
+
+        for y in range(first_y, int(bottom) + self.grid_size, self.grid_size):
+            painter.drawLine(int(left), y, int(right), y)
+
+        painter.restore()
 
     def set_node_placement_mode(self, active):
         self.node_placement_mode = active
@@ -86,10 +115,14 @@ class CanvasView(QGraphicsView):
             self.scene().clearSelection()
         self.update_cursor()
 
+    def set_pipe_creation_mode(self, active):
+        self.pipe_creation_mode = active
+        self.update_cursor()
+
     def update_cursor(self):
         if self.is_panning:
             self.setCursor(Qt.CursorShape.ClosedHandCursor)
-        elif self.node_placement_mode:
+        elif self.node_placement_mode or self.pipe_creation_mode:
             self.setCursor(Qt.CursorShape.CrossCursor)
         else:
             self.unsetCursor()
@@ -109,9 +142,21 @@ class CanvasView(QGraphicsView):
         else:
             self.scene().clearSelection()
 
-        #PySide6 workaround: accessing the clicked item's scene prevents grid lines from disappearing after a Select-mode click
-        #revisit if the canvas/selection implementation is refactored
-        _ = (clicked_item is not None and clicked_item.scene() is self.scene())
+    def node_marker_at(self, position):
+        item = self.itemAt(position)
+
+        while item is not None:
+            if isinstance(item, NodeMarker):
+                return item
+            item = item.parentItem()
+        else:
+            self.scene().clearSelection()
+
+        # #PySide6 workaround: accessing the clicked item's scene prevents grid lines from disappearing after a Select-mode click
+        # #revisit if the canvas/selection implementation is refactored
+        # _ = (item is not None and item.scene() is self.scene())
+
+        # return None
 
     def wheelEvent(self, event):
         wheel_delta = event.angleDelta().y()
@@ -180,6 +225,12 @@ class CanvasView(QGraphicsView):
                 self.node_placement_callback(self.mapToScene(click_position))
             elif should_select_item:
                 self.select_item_at(click_position)
+            elif self.pipe_creation_mode and self.pipe_node_callback is not None:
+                marker = self.node_marker_at(click_position)
+                if marker is not None:
+                    self.pipe_node_callback(marker)
+            elif self.pipe_creation_mode and self.pipe_node_callback is not None:
+                self.select_item_at(click_position)
 
             event.accept()
             return
@@ -234,6 +285,7 @@ class MainWindow(QMainWindow):
 
         self.active_tool = None
         self.toolbox_buttons = {}
+        self.pipe_start_node = None
 
         for name in ("Select", "Nodes", "Pipes", "Source", "Consumer", "Delete"):
             button = QPushButton(name)
@@ -257,18 +309,9 @@ class MainWindow(QMainWindow):
         self.scene.setSceneRect(0, 0, 2000, 2000)
 
         self.grid_size = 25
-        grid_pen = QPen(QColor("#d0d0d0"))
-        for position in range(0, 2001, self.grid_size):
-            vertical_line = self.scene.addLine(position, 0, position, 2000, grid_pen)
-            horizontal_line = self.scene.addLine(0, position, 2000, position, grid_pen)
-
-            for grid_line in (vertical_line, horizontal_line):
-                grid_line.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, False)
-                grid_line.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
-                grid_line.setZValue(-1)
-
-        self.canvas = CanvasView(self.scene)
+        self.canvas = CanvasView(self.scene, self.grid_size)
         self.canvas.node_placement_callback = self.place_node
+        self.canvas.pipe_node_callback = self.select_pipe_node
         workspace_layout.addWidget(self.canvas, 1)
         main_layout.addLayout(workspace_layout)
 
@@ -369,6 +412,9 @@ class MainWindow(QMainWindow):
 
         self.canvas.set_node_placement_mode(self.active_tool == "Nodes")
         self.canvas.set_selection_mode(self.active_tool == "Select")
+        self.canvas.set_pipe_creation_mode(self.active_tool == "Pipes")
+
+        self.pipe_start_node = None
 
     def place_node(self, scene_position):
         x = float(round(scene_position.x() / self.grid_size) * self.grid_size)
@@ -376,11 +422,40 @@ class MainWindow(QMainWindow):
         node = self.model.createNode(x, y, 0.0)
 
         marker = NodeMarker(x, y)
+        marker.setData(0, node.ID)
         self.scene.addItem(marker)
 
         label = self.scene.addText(node.ID)
         label.setParentItem(marker)
         label.setPos(8, -12)
+
+    def select_pipe_node(self, marker):
+        node_id = marker.data(0)
+        if node_id not in self.model.nodes:
+            return
+
+        if self.pipe_start_node is None:
+            self.pipe_start_node = marker
+            return
+
+        if marker is self.pipe_start_node:
+            return
+
+        start_node_id = self.pipe_start_node.data(0)
+        end_node_id = marker.data(0)
+        if start_node_id not in self.model.nodes or end_node_id not in self.model.nodes:
+            self.pipe_start_node = None
+            return
+
+        self.model.create_pipe(start_node_id, end_node_id)
+        pipe_line = self.scene.addLine(
+            self.pipe_start_node.pos().x(),
+            self.pipe_start_node.pos().y(),
+            marker.pos().x(),
+            marker.pos().y(),
+        )
+        pipe_line.setZValue(-0.5)
+        self.pipe_start_node = None
 
 
 def main():
