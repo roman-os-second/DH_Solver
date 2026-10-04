@@ -436,6 +436,8 @@ class MainWindow(QMainWindow):
         x = float(round(scene_position.x() / self.grid_size) * self.grid_size)
         y = float(round(scene_position.y() / self.grid_size) * self.grid_size)
         node = self.model.create_node(x, y, 0.0)
+        if node is None:
+            return
 
         marker = NodeMarker(x, y)
         marker.setData(0, node.ID)

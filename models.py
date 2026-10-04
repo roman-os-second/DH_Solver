@@ -47,6 +47,10 @@ class NetworkModel:
         self.pipe_counter = 0
 
     def create_node(self, x, y, z):
+        for existing_node in self.nodes.values():
+            if existing_node.X == x and existing_node.Y == y:
+                return None
+
         self.node_counter += 1
         node_id = f"N{self.node_counter}"
         node = Node(node_id, x, y, z)
