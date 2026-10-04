@@ -53,9 +53,6 @@ class NetworkModel:
         self.add_node(node)
         return node
 
-    def createNode(self, x, y, z):
-        return self.create_node(x, y, z)
-
     def create_pipe(self, start_node, end_node):
         self.pipe_counter += 1
         pipe = Pipe(

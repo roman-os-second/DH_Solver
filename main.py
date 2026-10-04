@@ -24,16 +24,34 @@ from PySide6.QtWidgets import (
 
 from models import NetworkModel
 
+GRID_SIZE = 25
+INITIAL_ZOOM = 1.0
+MIN_ZOOM = 0.2
+MAX_ZOOM = 5.0
+ZOOM_FACTOR = 1.15
+NODE_MARKER_SIZE = 10
+NORMAL_BORDER_COLOR = "#1f4d7a"
+NORMAL_FILL_COLOR = "#4a90c2"
+SELECTED_BORDER_COLOR = "#f28c28"
+SELECTED_FILL_COLOR = "#ffd84d"
+SCENE_SIZE = (2000, 2000)
+INITIAL_WINDOW_SIZE = (640, 400)
+
 
 class NodeMarker(QGraphicsEllipseItem):
     def __init__(self, x, y):
-        super().__init__(-5, -5, 10, 10)
+        super().__init__(
+            -NODE_MARKER_SIZE / 2,
+            -NODE_MARKER_SIZE / 2,
+            NODE_MARKER_SIZE,
+            NODE_MARKER_SIZE,
+        )
         self.setPos(x, y)
 
-        self.normal_pen = QPen(QColor("#1f4d7a"))
-        self.normal_brush = QBrush(QColor("#4a90c2"))
-        self.selected_pen = QPen(QColor("#f28c28"))
-        self.selected_brush = QBrush(QColor("#ffd84d"))
+        self.normal_pen = QPen(QColor(NORMAL_BORDER_COLOR))
+        self.normal_brush = QBrush(QColor(NORMAL_FILL_COLOR))
+        self.selected_pen = QPen(QColor(SELECTED_BORDER_COLOR))
+        self.selected_brush = QBrush(QColor(SELECTED_FILL_COLOR))
 
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable)
         self.update_appearance(False)
@@ -63,10 +81,10 @@ class CanvasView(QGraphicsView):
         super().__init__(scene)
 
         self.grid_size = grid_size
-        self.zoom_level = 1.0
-        self.min_zoom = 0.2
-        self.max_zoom = 5.0
-        self.zoom_factor = 1.15
+        self.zoom_level = INITIAL_ZOOM
+        self.min_zoom = MIN_ZOOM
+        self.max_zoom = MAX_ZOOM
+        self.zoom_factor = ZOOM_FACTOR
         self.node_placement_mode = False
         self.selection_mode = False
         self.pipe_creation_mode = False
@@ -229,8 +247,6 @@ class CanvasView(QGraphicsView):
                 marker = self.node_marker_at(click_position)
                 if marker is not None:
                     self.pipe_node_callback(marker)
-            elif self.pipe_creation_mode and self.pipe_node_callback is not None:
-                self.select_item_at(click_position)
 
             event.accept()
             return
@@ -245,7 +261,7 @@ class MainWindow(QMainWindow):
         self.model = NetworkModel()
 
         self.setWindowTitle("DH Solver")
-        self.resize(640, 400)
+        self.resize(*INITIAL_WINDOW_SIZE)
 
         central_widget = QWidget()
         main_layout = QVBoxLayout(central_widget)
@@ -306,9 +322,9 @@ class MainWindow(QMainWindow):
         workspace_layout.addWidget(toolbox_separator)
 
         self.scene = QGraphicsScene(self)
-        self.scene.setSceneRect(0, 0, 2000, 2000)
+        self.scene.setSceneRect(0, 0, *SCENE_SIZE)
 
-        self.grid_size = 25
+        self.grid_size = GRID_SIZE
         self.canvas = CanvasView(self.scene, self.grid_size)
         self.canvas.node_placement_callback = self.place_node
         self.canvas.pipe_node_callback = self.select_pipe_node
@@ -419,7 +435,7 @@ class MainWindow(QMainWindow):
     def place_node(self, scene_position):
         x = float(round(scene_position.x() / self.grid_size) * self.grid_size)
         y = float(round(scene_position.y() / self.grid_size) * self.grid_size)
-        node = self.model.createNode(x, y, 0.0)
+        node = self.model.create_node(x, y, 0.0)
 
         marker = NodeMarker(x, y)
         marker.setData(0, node.ID)
